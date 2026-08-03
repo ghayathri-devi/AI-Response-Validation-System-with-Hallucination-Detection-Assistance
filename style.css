@@ -554,7 +554,8 @@ input[type="file"]::file-selector-button:hover{
 BUTTON (pill style, editorial)
 ============================== */
 
-button#evaluateBtn{
+button#evaluateBtn,
+button#batchEvaluateBtn{
 
     margin-top:28px;
 
@@ -584,13 +585,144 @@ button#evaluateBtn{
 
 }
 
-button#evaluateBtn:hover{
+button#evaluateBtn:hover,
+button#batchEvaluateBtn:hover{
 
     transform:translateY(-3px);
 
     background:var(--accent-dark);
 
     box-shadow:0 14px 28px -6px rgba(205,189,240,0.6);
+
+}
+
+/* ==============================
+VERDICT CARD (aggregated result)
+============================== */
+
+.verdict-card{
+
+    background:var(--card);
+
+    border-radius:18px;
+
+    padding:32px 34px;
+
+    box-shadow:var(--shadow);
+
+    border-left:6px solid var(--accent);
+
+}
+
+.verdict-eyebrow{
+
+    display:block;
+
+    font-family:"JetBrains Mono", monospace;
+
+    font-size:12px;
+
+    letter-spacing:0.14em;
+
+    color:var(--text-muted);
+
+    margin-bottom:14px;
+
+}
+
+.verdict-row{
+
+    display:flex;
+
+    align-items:baseline;
+
+    gap:20px;
+
+    flex-wrap:wrap;
+
+}
+
+.verdict-label{
+
+    font-family:"Oswald", sans-serif;
+
+    font-weight:700;
+
+    font-size:38px;
+
+    text-transform:uppercase;
+
+    letter-spacing:0.01em;
+
+    color:var(--text-heading);
+
+}
+
+.verdict-score{
+
+    font-family:"Oswald", sans-serif;
+
+    font-weight:700;
+
+    font-size:38px;
+
+    color:var(--accent);
+
+}
+
+.verdict-summary{
+
+    margin-top:16px;
+
+    font-size:15.5px;
+
+    line-height:1.6;
+
+    color:var(--text-body);
+
+    max-width:70ch;
+
+}
+
+.verdict-card.verdict-excellent{
+
+    border-left-color:#8fe0a8;
+
+}
+
+.verdict-card.verdict-excellent .verdict-score{
+
+    color:#8fe0a8;
+
+}
+
+.verdict-card.verdict-good{
+
+    border-left-color:var(--accent);
+
+}
+
+.verdict-card.verdict-needs-improvement{
+
+    border-left-color:#f0c46e;
+
+}
+
+.verdict-card.verdict-needs-improvement .verdict-score{
+
+    color:#f0c46e;
+
+}
+
+.verdict-card.verdict-poor{
+
+    border-left-color:#e07a7a;
+
+}
+
+.verdict-card.verdict-poor .verdict-score{
+
+    color:#e07a7a;
 
 }
 
@@ -605,6 +737,8 @@ METRIC GRID
     grid-template-columns:repeat(4,1fr);
 
     gap:22px;
+
+    margin-bottom:26px;
 
 }
 
@@ -717,6 +851,74 @@ METRIC GRID
     margin-bottom:8px;
 
     font-weight:500;
+
+}
+
+/* ==============================
+BATCH RESULTS TABLE
+============================== */
+
+.batch-table-wrap{
+
+    overflow-x:auto;
+
+    border-radius:14px;
+
+}
+
+.batch-table{
+
+    width:100%;
+
+    border-collapse:collapse;
+
+    background:#121212;
+
+    border-radius:14px;
+
+    overflow:hidden;
+
+}
+
+.batch-table th{
+
+    text-align:left;
+
+    padding:14px 16px;
+
+    background:#1c1c1c;
+
+    color:var(--accent);
+
+    font-family:"JetBrains Mono", monospace;
+
+    font-size:12px;
+
+    text-transform:uppercase;
+
+    letter-spacing:0.05em;
+
+    white-space:nowrap;
+
+}
+
+.batch-table td{
+
+    padding:14px 16px;
+
+    color:var(--text-body);
+
+    font-size:14px;
+
+    border-top:1px solid #262626;
+
+    max-width:320px;
+
+}
+
+.batch-table tbody tr:hover{
+
+    background:#1a1a1a;
 
 }
 

@@ -69,6 +69,10 @@
                      History
                 </a>
 
+                <a class="nav-link" data-tab="batchTab">
+                     Batch
+                </a>
+
             </nav>
 
         </div>
@@ -105,7 +109,7 @@
 
                 <p class="hero-sub">
 
-                   Question in, answer in, reference optional. Three agents score relevance, accuracy, and hallucination risk — with reasoning attached to every number.
+                   Question in, answer in, reference optional. Four agents score relevance, accuracy, completeness, and hallucination risk — a fifth agent weighs them into one verdict.
 
                 </p>
 
@@ -194,6 +198,26 @@
 
             <div class="tick-strip"></div>
 
+            <!-- VERDICT (aggregated result, shown separately and first) -->
+
+            <section class="verdict-card">
+
+                <span class="verdict-eyebrow">VERDICT</span>
+
+                <div class="verdict-row">
+
+                    <span id="verdictLabel" class="verdict-label">--</span>
+
+                    <span id="overall" class="verdict-score">--</span>
+
+                </div>
+
+                <p id="verdictSummary" class="verdict-summary"></p>
+
+            </section>
+
+            <div class="tick-strip"></div>
+
             <!-- EVALUATION METRICS -->
 
             <section class="score-grid">
@@ -256,6 +280,36 @@
 
                     <h3>
 
+                        Completeness
+
+                    </h3>
+
+                    <div
+                        id="completeness"
+                        class="metric">
+
+                        --
+
+                    </div>
+
+                    <p
+                        id="completenessReasoning"
+                        class="metric-reasoning">
+
+                    </p>
+
+                    <ul
+                        id="completenessMissing"
+                        class="flag-list">
+
+                    </ul>
+
+                </div>
+
+                <div class="metric-card">
+
+                    <h3>
+
                         Hallucination Risk
 
                     </h3>
@@ -279,24 +333,6 @@
                         class="flag-list">
 
                     </ul>
-
-                </div>
-
-                <div class="metric-card">
-
-                    <h3>
-
-                        Overall Score
-
-                    </h3>
-
-                    <div
-                        id="overall"
-                        class="metric">
-
-                        --
-
-                    </div>
 
                 </div>
 
@@ -362,6 +398,139 @@
                         <p>No evaluations yet.</p>
                     </div>
 
+                </div>
+
+            </section>
+
+        </div>
+
+        <!-- ===========================
+             BATCH TAB
+        =========================== -->
+
+        <div class="tab-page" id="batchTab">
+
+            <header class="hero">
+
+                <span class="eyebrow"><span class="eyebrow-dot"></span> BULK EVALUATION</span>
+
+                <h1>UPLOAD A <span class="accent-word">BATCH</span>.</h1>
+
+                <p class="hero-sub">Upload a CSV with 'question' and 'answer' columns (a 'reference_answer' column is optional). Up to 20 rows per file — each row runs through all four agents.</p>
+
+            </header>
+
+            <div class="tick-strip"></div>
+
+            <section class="input-card">
+
+                <h2>
+
+                    Batch Input
+
+                </h2>
+
+                <label>
+
+                    CSV File
+
+                </label>
+
+                <div class="file-row">
+
+                    <input
+                        type="file"
+                        id="batchCsv"
+                        accept=".csv" />
+
+                    <button
+                        type="button"
+                        id="clearBatchCsvBtn"
+                        class="clear-file-btn"
+                        title="Remove selected file">
+
+                        ✕
+
+                    </button>
+
+                </div>
+
+                <p
+                    id="batchFileName"
+                    class="file-name-display">
+
+                </p>
+
+                <button id="batchEvaluateBtn">
+
+                    RUN BATCH
+
+                </button>
+
+            </section>
+
+            <div class="tick-strip"></div>
+
+            <!-- AGGREGATE SUMMARY -->
+
+            <section class="score-grid" id="batchAggregateGrid" hidden>
+
+                <div class="metric-card">
+                    <h3>Rows Evaluated</h3>
+                    <div id="batchCount" class="metric">--</div>
+                </div>
+
+                <div class="metric-card">
+                    <h3>Avg Accuracy</h3>
+                    <div id="batchAvgAccuracy" class="metric">--</div>
+                </div>
+
+                <div class="metric-card">
+                    <h3>Avg Relevance</h3>
+                    <div id="batchAvgRelevance" class="metric">--</div>
+                </div>
+
+                <div class="metric-card">
+                    <h3>Avg Overall</h3>
+                    <div id="batchAvgOverall" class="metric">--</div>
+                    <p id="batchVerdictDistribution" class="metric-reasoning"></p>
+                </div>
+
+            </section>
+
+            <!-- PER-ROW RESULTS -->
+
+            <section class="context-card" id="batchResultsSection" hidden>
+
+                <div class="section-title">Per-Row Results</div>
+
+                <div class="batch-table-wrap">
+
+                    <table class="batch-table">
+                        <thead>
+                            <tr>
+                                <th>Question</th>
+                                <th>Answer</th>
+                                <th>Verdict</th>
+                                <th>Overall</th>
+                                <th>Accuracy</th>
+                                <th>Relevance</th>
+                                <th>Completeness</th>
+                                <th>Hallucination</th>
+                            </tr>
+                        </thead>
+                        <tbody id="batchResultsBody">
+                        </tbody>
+                    </table>
+
+                </div>
+
+            </section>
+
+            <section class="context-card" id="batchEmptyState">
+
+                <div class="context-item">
+                    <p>Upload a CSV and run a batch to see aggregate results and per-row scores here.</p>
                 </div>
 
             </section>

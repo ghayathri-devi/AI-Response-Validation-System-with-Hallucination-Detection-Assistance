@@ -6,6 +6,7 @@ import json
 import re
 import difflib
 import string
+from typing import Optional
 
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -80,7 +81,6 @@ def _parse_json_response(raw_text: str) -> dict:
 
 
 
-# Grounding safety net — verifies each llm flagged claim against the actual retrieved text using string matching (if llm fails)
 def _normalize(text: str) -> str:
     text = text.lower().strip()
     text = text.translate(str.maketrans("", "", string.punctuation))
@@ -99,6 +99,8 @@ def _is_actually_grounded(statement: str, context_text: str, threshold: float = 
     if norm_stmt in norm_ctx:
         return True
 
+    # Fuzzy fallback: find the longest matching block between the
+    # claim and the context, and see how much of the claim it covers
     matcher = difflib.SequenceMatcher(None, norm_ctx, norm_stmt)
     match = matcher.find_longest_match(0, len(norm_ctx), 0, len(norm_stmt))
     overlap_ratio = match.size / max(1, len(norm_stmt))
@@ -121,8 +123,7 @@ def _verify_flagged_statements(flagged: list[str], context_text: str) -> tuple[l
 
     return verified, removed
 
-
-#llm fallback
+#if llm fails
 
 def _fallback_hallucination(context_text: str) -> dict:
     if not context_text.strip():
@@ -139,14 +140,22 @@ def _fallback_hallucination(context_text: str) -> dict:
 
 
 
+# Public function
 
-def detect_hallucination(answer: str, contexts: list[str]) -> dict:
+
+def detect_hallucination(answer: str, contexts: list[str], reference_answer: Optional[str] = None) -> dict:
     """
-    Checks `answer` claim by claim against the retrieved `contexts`, flagging
-    any specific statements that are not supported by that source content.
-    LLM-flagged claims are cross-checked against the raw context text with
-    string matching before being finalized, to catch LLM reasoning errors
-    where it flags something that is actually present in the source.
+    Checks `answer` claim by claim against the retrieved `contexts` AND the
+    reference answer (if provided), flagging any specific statements that
+    are not supported by EITHER source. Combining both sources matters:
+    retrieval can miss relevant chunks for general-knowledge questions that
+    aren't well covered in the indexed dataset, and without this, a fully
+    correct answer with a valid reference could get falsely flagged just
+    because retrieval happened to return irrelevant context.
+
+    LLM-flagged claims are cross-checked against the raw combined source
+    text with string matching before being finalized, to catch LLM
+    reasoning errors where it flags something that is actually present.
 
     Returns:
         {
@@ -156,7 +165,13 @@ def detect_hallucination(answer: str, contexts: list[str]) -> dict:
         }
     """
 
-    context_text = " ".join(contexts).strip() if contexts else ""
+    combined_sources = []
+    if reference_answer and reference_answer.strip():
+        combined_sources.append(reference_answer.strip())
+    if contexts:
+        combined_sources.extend(contexts)
+
+    context_text = " ".join(combined_sources).strip()
 
     if not answer.strip():
         return {
@@ -183,6 +198,8 @@ def detect_hallucination(answer: str, contexts: list[str]) -> dict:
             flagged = []
         flagged = [str(item).strip() for item in flagged if str(item).strip()]
 
+        # Grounding safety net: remove any flagged claim that is actually
+        # present in the combined context/reference (LLM false positive)
         flagged, num_removed = _verify_flagged_statements(flagged, context_text)
 
         reasoning = str(parsed.get("reasoning", "")).strip() or "No reasoning provided."
@@ -190,7 +207,7 @@ def detect_hallucination(answer: str, contexts: list[str]) -> dict:
         if num_removed > 0:
             reasoning += (
                 f" (Note: {num_removed} claim(s) initially flagged were verified to be "
-                f"directly present in the retrieved context and removed as false positives.)"
+                f"directly present in the retrieved context or reference answer and removed as false positives.)"
             )
 
         # Recompute risk based on the corrected flagged list
@@ -212,11 +229,11 @@ def detect_hallucination(answer: str, contexts: list[str]) -> dict:
 
 
 if __name__ == "__main__":
+    # Quick standalone test — reference_answer confirms "Paris" is correct
+    # even though contexts (simulating a retrieval miss) has nothing relevant
     result = detect_hallucination(
-        answer="Artificial intelligence is the field of study in computer science that develops and studies intelligent machines.",
-        contexts=[
-            "Artificial intelligence (AI) is the intelligence of machines or software. "
-            "It is also the field of study in computer science that develops and studies intelligent machines."
-        ],
+        answer="Paris is the capital of France.",
+        contexts=["This chunk is about something completely unrelated to France."],
+        reference_answer="Paris",
     )
     print(result)

@@ -11,12 +11,29 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from sentence_transformers import SentenceTransformer, util
 
+try:
+    from json_repair import repair_json
+    _HAS_JSON_REPAIR = True
+except ImportError:
+    _HAS_JSON_REPAIR = False
+
+
+# =====================================================
+# Groq LLM — one call per evaluation (retried once on
+# JSON parse failure before falling back)
+# =====================================================
+
 groq_llm = ChatGroq(
     model="llama-3.1-8b-instant",
     groq_api_key=os.getenv("GROQ_API_KEY"),
     temperature=0,
 )
 
+
+# =====================================================
+# Local fallback (used only if the LLM call fails twice
+# or returns something unparsable, so the API never breaks)
+# =====================================================
 
 st_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -33,7 +50,9 @@ def _fallback_accuracy(answer: str, ground_truth: str) -> dict:
     }
 
 
-#prompt
+# =====================================================
+# Prompt
+# =====================================================
 
 SYSTEM_PROMPT = """You are a strict evaluation judge. You check whether an AI-generated answer \
 is FACTUALLY CORRECT when compared against a ground truth source — either a reference answer or \
@@ -71,6 +90,9 @@ IMPORTANT: Do NOT score 0.0 just because a claim is not explicitly stated in the
 An UNSTATED claim that is reasonable and not contradicted should still receive partial credit \
 (0.2 or higher), never zero. Reserve 0.0 strictly for direct contradictions.
 
+IMPORTANT: Keep "evidence" and "supporting_excerpt" SHORT — evidence under 40 words, \
+supporting_excerpt under 20 words. Do not list every claim individually; summarize.
+
 IMPORTANT: Your entire response must be valid JSON. Never use double-quote characters (") inside \
 the "evidence" or "supporting_excerpt" string values — if you need to quote text, use single quotes \
 (') instead. Do not include line breaks inside string values.
@@ -87,9 +109,22 @@ def _build_user_prompt(answer: str, ground_truth: str, source_label: str) -> str
 
 def _parse_json_response(raw_text: str) -> dict:
     match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-    if not match:
-        raise ValueError("No JSON object found in response")
-    return json.loads(match.group(0))
+    candidate = match.group(0) if match else raw_text
+
+    # First try strict parsing
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # Fall back to a tolerant repair pass — handles stray quotes, trailing
+    # commas, and other minor malformations small LLMs sometimes produce
+    if _HAS_JSON_REPAIR:
+        repaired = repair_json(candidate, return_objects=True)
+        if isinstance(repaired, dict) and repaired:
+            return repaired
+
+    raise ValueError("Could not parse a valid JSON object from the response")
 
 
 def _call_llm_once(answer: str, ground_truth: str, source_label: str) -> dict:
@@ -112,6 +147,10 @@ def _call_llm_once(answer: str, ground_truth: str, source_label: str) -> dict:
     }
 
 
+# =====================================================
+# Public function
+# =====================================================
+
 def judge_accuracy(
     answer: str,
     reference_answer: Optional[str],
@@ -120,13 +159,9 @@ def judge_accuracy(
     """
     Scores the factual accuracy of `answer` against either the reference
     answer (if provided) or the retrieved context chunks (fallback source),
-    with supporting evidence, using a single LLM call (retried once if the
-    first response isn't valid JSON before falling back to local scoring).
-
-    Scoring distinguishes between claims that CONTRADICT the ground truth
-    (scored near 0) and claims that are simply UNSTATED but reasonable
-    (scored with partial credit) — a claim not being explicitly mentioned
-    is not treated the same as a claim being wrong.
+    with supporting evidence, using a single LLM call. Parsing tries strict
+    JSON first, then a tolerant repair pass, then retries the LLM call once
+    before falling back to local semantic similarity scoring.
 
     Returns:
         {
@@ -163,7 +198,7 @@ def judge_accuracy(
         }
 
     last_error = None
-    for attempt in range(2):  #parse failure retry
+    for attempt in range(2):  # try once, retry once on parse failure
         try:
             result = _call_llm_once(answer, ground_truth, source_label)
             result["used_reference_answer"] = has_reference
@@ -180,8 +215,9 @@ def judge_accuracy(
 
 
 if __name__ == "__main__":
+    # Quick standalone test
     result = judge_accuracy(
-        answer="Artificial Intelligence (AI) is a branch of computer science that enables machines to simulate human intelligence.",
+        answer="Artificial Intelligence (AI) is the ability of a computer or machine to perform tasks that normally require human intelligence. These tasks include learning, reasoning, understanding language, recognising images and speech, making decisions, and solving problems.",
         reference_answer=None,
         contexts=[
             "Artificial intelligence (AI) is the intelligence of machines or software, as opposed "

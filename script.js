@@ -7,7 +7,13 @@ const pdfInput = document.getElementById("sourcePdf");
 const clearPdfBtn = document.getElementById("clearPdfBtn");
 const pdfFileName = document.getElementById("pdfFileName");
 
+const batchButton = document.getElementById("batchEvaluateBtn");
+const batchCsvInput = document.getElementById("batchCsv");
+const clearBatchCsvBtn = document.getElementById("clearBatchCsvBtn");
+const batchFileName = document.getElementById("batchFileName");
+
 button.addEventListener("click", evaluateResponse);
+batchButton.addEventListener("click", runBatchEvaluation);
 
 //-------------------------------------
 // Tab navigation
@@ -29,7 +35,7 @@ navLinks.forEach((link) => {
 });
 
 //-------------------------------------
-// Show selected filename, or clear it
+// Show selected filename, or clear it (single-evaluation PDF)
 //-------------------------------------
 
 pdfInput.addEventListener("change", () => {
@@ -46,7 +52,24 @@ clearPdfBtn.addEventListener("click", () => {
 });
 
 //-------------------------------------
-// Run an evaluation
+// Batch CSV file select / clear
+//-------------------------------------
+
+batchCsvInput.addEventListener("change", () => {
+    if (batchCsvInput.files.length > 0) {
+        batchFileName.textContent = `Selected: ${batchCsvInput.files[0].name}`;
+    } else {
+        batchFileName.textContent = "";
+    }
+});
+
+clearBatchCsvBtn.addEventListener("click", () => {
+    batchCsvInput.value = "";
+    batchFileName.textContent = "";
+});
+
+//-------------------------------------
+// Run a single evaluation
 //-------------------------------------
 
 async function evaluateResponse() {
@@ -93,6 +116,25 @@ async function evaluateResponse() {
 
         const evaluation = data.evaluation;
 
+        //---------------------------------------
+        // Verdict (aggregated result)
+        //---------------------------------------
+
+        document.getElementById("verdictLabel").innerHTML =
+            evaluation.verdict_label || "--";
+
+        document.getElementById("overall").innerHTML =
+            formatScore(evaluation.overall_score);
+
+        document.getElementById("verdictSummary").innerHTML =
+            evaluation.verdict_summary || "";
+
+        applyVerdictColor(evaluation.verdict_label);
+
+        //---------------------------------------
+        // Individual agent scores
+        //---------------------------------------
+
         document.getElementById("accuracy").innerHTML =
             formatScore(evaluation.accuracy);
 
@@ -110,16 +152,21 @@ async function evaluateResponse() {
         document.getElementById("relevanceReasoning").innerHTML =
             evaluation.relevance_reasoning || "";
 
+        document.getElementById("completeness").innerHTML =
+            formatScore(evaluation.completeness);
+
+        document.getElementById("completenessReasoning").innerHTML =
+            evaluation.completeness_reasoning || "";
+
+        renderListItems("completenessMissing", evaluation.completeness_missing_aspects);
+
         document.getElementById("hallucination").innerHTML =
             evaluation.hallucination_risk;
 
         document.getElementById("hallucinationReasoning").innerHTML =
             evaluation.hallucination_reasoning || "";
 
-        renderFlaggedStatements(evaluation.hallucination_flagged_statements);
-
-        document.getElementById("overall").innerHTML =
-            formatScore(evaluation.overall_score);
+        renderListItems("hallucinationFlags", evaluation.hallucination_flagged_statements);
 
         renderContexts(data.retrieved_context, data.used_source_pdf);
 
@@ -145,23 +192,145 @@ async function evaluateResponse() {
 }
 
 //-------------------------------------
-// Render hallucination flagged statements list
+// Run a batch evaluation from an uploaded CSV
 //-------------------------------------
 
-function renderFlaggedStatements(statements) {
+async function runBatchEvaluation() {
 
-    const list = document.getElementById("hallucinationFlags");
-    list.innerHTML = "";
+    const file = batchCsvInput.files.length > 0 ? batchCsvInput.files[0] : null;
 
-    if (!statements || statements.length === 0) {
+    if (!file) {
+        alert("Please choose a CSV file first.");
         return;
     }
 
-    statements.forEach((statement) => {
+    batchButton.innerHTML = "⏳ Running batch...";
+    batchButton.disabled = true;
+
+    try {
+
+        const formData = new FormData();
+        formData.append("csv_file", file);
+
+        const response = await fetch(`${API_BASE}/batch-evaluate`, {
+            method: "POST",
+            body: formData,
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || "Batch request failed");
+        }
+
+        renderBatchResults(data);
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+        alert(`Batch evaluation failed: ${error.message}`);
+
+    }
+
+    finally {
+
+        batchButton.innerHTML = "RUN BATCH";
+        batchButton.disabled = false;
+
+    }
+
+}
+
+//-------------------------------------
+// Render batch aggregate summary + per-row results table
+//-------------------------------------
+
+function renderBatchResults(data) {
+
+    const aggregate = data.aggregate;
+    const results = data.results;
+
+    document.getElementById("batchEmptyState").hidden = true;
+    document.getElementById("batchAggregateGrid").hidden = false;
+    document.getElementById("batchResultsSection").hidden = false;
+
+    document.getElementById("batchCount").innerHTML = aggregate.count;
+    document.getElementById("batchAvgAccuracy").innerHTML = formatScore(aggregate.avg_accuracy);
+    document.getElementById("batchAvgRelevance").innerHTML = formatScore(aggregate.avg_relevance);
+    document.getElementById("batchAvgOverall").innerHTML = formatScore(aggregate.avg_overall_score);
+
+    const distributionText = Object.entries(aggregate.verdict_distribution || {})
+        .map(([label, count]) => `${count} ${label}`)
+        .join(" · ");
+
+    document.getElementById("batchVerdictDistribution").innerHTML =
+        distributionText + (aggregate.total_flagged_hallucinations
+            ? ` · ${aggregate.total_flagged_hallucinations} hallucinated claim(s) flagged across the batch`
+            : "");
+
+    const tbody = document.getElementById("batchResultsBody");
+    tbody.innerHTML = "";
+
+    results.forEach((r) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${r.question}</td>
+            <td>${r.answer}</td>
+            <td>${r.verdict_label}</td>
+            <td>${formatScore(r.overall_score)}</td>
+            <td>${formatScore(r.accuracy)}</td>
+            <td>${formatScore(r.relevance)}</td>
+            <td>${formatScore(r.completeness)}</td>
+            <td>${r.hallucination_risk}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+}
+
+//-------------------------------------
+// Render a bulleted list into any <ul> by id (used for
+// both hallucination flags and completeness missing aspects)
+//-------------------------------------
+
+function renderListItems(elementId, items) {
+
+    const list = document.getElementById(elementId);
+    list.innerHTML = "";
+
+    if (!items || items.length === 0) {
+        return;
+    }
+
+    items.forEach((item) => {
         const li = document.createElement("li");
-        li.textContent = statement;
+        li.textContent = item;
         list.appendChild(li);
     });
+
+}
+
+//-------------------------------------
+// Color-code the verdict card border by label
+//-------------------------------------
+
+function applyVerdictColor(label) {
+
+    const card = document.querySelector(".verdict-card");
+    card.classList.remove("verdict-excellent", "verdict-good", "verdict-needs-improvement", "verdict-poor");
+
+    const map = {
+        "Excellent": "verdict-excellent",
+        "Good": "verdict-good",
+        "Needs Improvement": "verdict-needs-improvement",
+        "Poor": "verdict-poor",
+    };
+
+    if (map[label]) {
+        card.classList.add(map[label]);
+    }
 
 }
 
@@ -248,18 +417,27 @@ async function loadHistory() {
                 ? `<ul class="flag-list">${flags.map(f => `<li>${f}</li>`).join("")}</ul>`
                 : "";
 
+            const missing = record.completeness_missing_aspects || [];
+            const missingHtml = missing.length > 0
+                ? `<ul class="flag-list">${missing.map(m => `<li>${m}</li>`).join("")}</ul>`
+                : "";
+
             div.innerHTML = `
-                <h4>${formatDate(record.created_at)}${refTag}${pdfTag}</h4>
+                <h4>${formatDate(record.created_at)} · ${record.verdict_label || ""}${refTag}${pdfTag}</h4>
                 <p><strong>Q:</strong> ${record.question}</p>
                 <p><strong>A:</strong> ${record.answer}</p>
                 <p>
                     Accuracy: ${formatScore(record.accuracy)} ·
                     Relevance: ${formatScore(record.relevance)} ·
+                    Completeness: ${formatScore(record.completeness)} ·
                     Hallucination: ${record.hallucination_risk} ·
                     Overall: ${formatScore(record.overall_score)}
                 </p>
+                <p class="metric-reasoning">${record.verdict_summary || ""}</p>
                 <p class="metric-reasoning">${record.relevance_reasoning || ""}</p>
                 <p class="metric-reasoning">${record.accuracy_evidence || ""}</p>
+                <p class="metric-reasoning">${record.completeness_reasoning || ""}</p>
+                ${missingHtml}
                 <p class="metric-reasoning">${record.hallucination_reasoning || ""}</p>
                 ${flagsHtml}
             `;

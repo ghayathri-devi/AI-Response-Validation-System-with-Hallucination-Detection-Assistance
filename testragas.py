@@ -1,4 +1,4 @@
-from ragas_agent import ragas_evaluate
+from hallucination_agent import ragas_evaluate
 
 result = ragas_evaluate(
 

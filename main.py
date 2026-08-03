@@ -1,7 +1,7 @@
 import io
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pypdf import PdfReader
 
@@ -9,12 +9,15 @@ from retrieval_agent import retrieve_context
 from relevance_agent import judge_relevance
 from accuracy_agent import judge_accuracy
 from hallucination_agent import detect_hallucination
+from completeness_agent import judge_completeness
+from verdict_agent import build_verdict
+from batch_evaluator import evaluate_batch
 from database import init_db, save_evaluation, get_history
 
 
 app = FastAPI(
     title="AI Response Quality Evaluator",
-    version="2.0"
+    version="3.0"
 )
 
 app.add_middleware(
@@ -43,10 +46,6 @@ def extract_pdf_text(file_bytes: bytes, max_chars: int = 3000) -> str:
         if len(text) >= max_chars:
             break
     return text.strip()[:max_chars]
-
-
-# Numeric proxy for hallucination risk, used only to compute the overall score
-_RISK_TO_SCORE = {"Low": 1.0, "Medium": 0.6, "High": 0.2}
 
 
 @app.post("/evaluate")
@@ -83,23 +82,37 @@ async def evaluate(
         contexts=retrieved_context,
     )
 
-    hallucination_score_proxy = _RISK_TO_SCORE.get(hallucination_result["hallucination_risk"], 0.5)
+    # --- Completeness Judge Agent ---
+    completeness_result = judge_completeness(question, answer)
 
-    overall_score = round(
-        (relevance_result["relevance_score"] + accuracy_result["accuracy_score"] + hallucination_score_proxy) / 3,
-        2,
+    # --- Verdict Agent — aggregates the four results above (no LLM call) ---
+    verdict_result = build_verdict(
+        relevance_result=relevance_result,
+        accuracy_result=accuracy_result,
+        completeness_result=completeness_result,
+        hallucination_result=hallucination_result,
     )
 
     evaluation = {
         "relevance": relevance_result["relevance_score"],
         "relevance_reasoning": relevance_result["reasoning"],
+
         "accuracy": accuracy_result["accuracy_score"],
         "accuracy_evidence": accuracy_result["evidence"],
         "accuracy_supporting_excerpt": accuracy_result["supporting_excerpt"],
+
+        "completeness": completeness_result["completeness_score"],
+        "completeness_reasoning": completeness_result["reasoning"],
+        "completeness_missing_aspects": completeness_result["missing_aspects"],
+
         "hallucination_risk": hallucination_result["hallucination_risk"],
         "hallucination_flagged_statements": hallucination_result["flagged_statements"],
         "hallucination_reasoning": hallucination_result["reasoning"],
-        "overall_score": overall_score,
+
+        "overall_score": verdict_result["overall_score"],
+        "verdict_label": verdict_result["verdict_label"],
+        "verdict_summary": verdict_result["summary"],
+
         "used_reference_answer": accuracy_result["used_reference_answer"],
     }
 
@@ -126,4 +139,30 @@ def history(limit: int = 20):
     return {
         "status": "success",
         "history": get_history(limit)
+    }
+
+
+@app.post("/batch-evaluate")
+async def batch_evaluate(csv_file: UploadFile = File(...)):
+    """
+    Accepts a CSV of question/answer (and optional reference_answer) pairs,
+    evaluates each row through the full agent pipeline, and returns both
+    per-row results and aggregated statistics across the batch.
+    """
+
+    if not csv_file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="File must be a .csv")
+
+    file_bytes = await csv_file.read()
+
+    try:
+        result = evaluate_batch(file_bytes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "status": "success",
+        "row_count": result["aggregate"]["count"],
+        "results": result["results"],
+        "aggregate": result["aggregate"],
     }

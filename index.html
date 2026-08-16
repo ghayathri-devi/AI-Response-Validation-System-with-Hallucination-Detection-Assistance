@@ -23,6 +23,8 @@
     <link rel="stylesheet"
         href="style.css">
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+
 </head>
 
 <body>
@@ -41,16 +43,13 @@
 
                 <div class="logo-circle">
 
-                    <svg viewBox="0 0 24 24" width="30" height="30" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="12" cy="12" r="9" stroke="#ad95e0" stroke-width="1.6"/>
-                        <path d="M8 12.5L10.5 15L16 9" stroke="#ad95e0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
+                    <span class="logo-initials">EA</span>
 
                 </div>
 
                 <div>
-                    <h2>AI Evaluator</h2>
-                    <p>Quality Dashboard</p>
+                    <h2>EvalAI</h2>
+                    <p>AI evaluator quality dashboard</p>
                 </div>
 
             </div>
@@ -71,6 +70,10 @@
 
                 <a class="nav-link" data-tab="batchTab">
                      Batch
+                </a>
+
+                <a class="nav-link" data-tab="analyticsTab">
+                     Analytics
                 </a>
 
             </nav>
@@ -502,7 +505,10 @@
 
             <section class="context-card" id="batchResultsSection" hidden>
 
-                <div class="section-title">Per-Row Results</div>
+                <div class="section-title-row">
+                    <div class="section-title">Per-Row Results</div>
+                    <button id="exportReportBtn" type="button" class="export-btn">EXPORT PDF REPORT</button>
+                </div>
 
                 <div class="batch-table-wrap">
 
@@ -531,6 +537,138 @@
 
                 <div class="context-item">
                     <p>Upload a CSV and run a batch to see aggregate results and per-row scores here.</p>
+                </div>
+
+            </section>
+
+        </div>
+
+        <!-- ===========================
+             ANALYTICS TAB
+        =========================== -->
+
+        <div class="tab-page" id="analyticsTab">
+
+            <header class="hero">
+
+                <span class="eyebrow"><span class="eyebrow-dot"></span> EVALUATION SCORING DASHBOARD</span>
+
+                <h1>QUALITY <span class="accent-word">TRENDS</span>.</h1>
+
+                <p class="hero-sub">Aggregated across every stored evaluation — pass/fail rates, per-dimension averages, hallucination frequency, and quality over time.</p>
+
+            </header>
+
+            <div class="tick-strip"></div>
+
+            <div class="tick-strip"></div>
+
+            <!-- FILTERS -->
+
+            <section class="input-card analytics-filters">
+
+                <h2>Filters</h2>
+
+                <div class="filter-row">
+
+                    <div class="filter-field">
+                        <label for="filterStartDate">Start Date</label>
+                        <input type="date" id="filterStartDate" />
+                    </div>
+
+                    <div class="filter-field">
+                        <label for="filterEndDate">End Date</label>
+                        <input type="date" id="filterEndDate" />
+                    </div>
+
+                    <div class="filter-field">
+                        <label for="filterMode">Evaluation Mode</label>
+                        <select id="filterMode">
+                            <option value="">All</option>
+                            <option value="single">Single</option>
+                            <option value="batch">Batch</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-field filter-actions">
+                        <button id="applyFiltersBtn" type="button">APPLY</button>
+                        <button id="clearFiltersBtn" type="button" class="filter-clear-btn">CLEAR</button>
+                    </div>
+
+                </div>
+
+            </section>
+
+            <section class="score-grid" id="analyticsSummaryGrid" hidden>
+
+                <div class="metric-card">
+                    <h3>Total Evaluations</h3>
+                    <div id="analyticsTotal" class="metric">--</div>
+                </div>
+
+                <div class="metric-card">
+                    <h3>Pass Rate</h3>
+                    <div id="analyticsPassRate" class="metric">--</div>
+                    <p class="metric-reasoning">Excellent or Good verdict</p>
+                </div>
+
+                <div class="metric-card">
+                    <h3>Avg Overall Score</h3>
+                    <div id="analyticsAvgOverall" class="metric">--</div>
+                </div>
+
+                <div class="metric-card">
+                    <h3>Hallucination Frequency</h3>
+                    <div id="analyticsHallucFreq" class="metric">--</div>
+                    <p class="metric-reasoning">Evaluations with at least 1 flagged claim</p>
+                </div>
+
+            </section>
+
+            <section class="score-grid" id="analyticsVerdictCountsGrid" hidden>
+
+                <div class="metric-card verdict-count-pass">
+                    <h3>Pass</h3>
+                    <div id="analyticsPassCount" class="metric">--</div>
+                    <p class="metric-reasoning">Excellent or Good verdict</p>
+                </div>
+
+                <div class="metric-card verdict-count-needs-improvement">
+                    <h3>Needs Improvement</h3>
+                    <div id="analyticsNeedsImprovementCount" class="metric">--</div>
+                </div>
+
+                <div class="metric-card verdict-count-fail">
+                    <h3>Fail</h3>
+                    <div id="analyticsFailCount" class="metric">--</div>
+                    <p class="metric-reasoning">Poor verdict</p>
+                </div>
+
+            </section>
+
+            <div class="chart-grid" id="analyticsChartsGrid" hidden>
+
+                <section class="context-card chart-card">
+                    <div class="section-title">Average Score by Dimension</div>
+                    <canvas id="dimensionChart"></canvas>
+                </section>
+
+                <section class="context-card chart-card">
+                    <div class="section-title">Verdict Distribution</div>
+                    <canvas id="verdictChart"></canvas>
+                </section>
+
+                <section class="context-card chart-card chart-card-wide">
+                    <div class="section-title">Quality Trend Over Time</div>
+                    <canvas id="trendChart"></canvas>
+                </section>
+
+            </div>
+
+            <section class="context-card" id="analyticsEmptyState">
+
+                <div class="context-item">
+                    <p>No evaluations yet — run an evaluation or a batch to populate the dashboard.</p>
                 </div>
 
             </section>

@@ -31,7 +31,26 @@ navLinks.forEach((link) => {
 
         link.classList.add("active");
         document.getElementById(targetId).classList.add("active");
+
+        if (targetId === "analyticsTab") {
+            loadAnalytics();
+        }
     });
+});
+
+//-------------------------------------
+// Analytics filters
+//-------------------------------------
+
+document.getElementById("applyFiltersBtn").addEventListener("click", () => {
+    loadAnalytics();
+});
+
+document.getElementById("clearFiltersBtn").addEventListener("click", () => {
+    document.getElementById("filterStartDate").value = "";
+    document.getElementById("filterEndDate").value = "";
+    document.getElementById("filterMode").value = "";
+    loadAnalytics();
 });
 
 //-------------------------------------
@@ -195,6 +214,8 @@ async function evaluateResponse() {
 // Run a batch evaluation from an uploaded CSV
 //-------------------------------------
 
+let lastBatchData = null;
+
 async function runBatchEvaluation() {
 
     const file = batchCsvInput.files.length > 0 ? batchCsvInput.files[0] : null;
@@ -224,6 +245,7 @@ async function runBatchEvaluation() {
         }
 
         renderBatchResults(data);
+        lastBatchData = data;
 
     }
 
@@ -286,6 +308,272 @@ function renderBatchResults(data) {
             <td>${r.hallucination_risk}</td>
         `;
         tbody.appendChild(tr);
+    });
+
+}
+
+//-------------------------------------
+// Export the current batch results as a PDF report
+//-------------------------------------
+
+document.getElementById("exportReportBtn").addEventListener("click", async () => {
+
+    if (!lastBatchData) {
+        alert("Run a batch evaluation first before exporting a report.");
+        return;
+    }
+
+    const exportBtn = document.getElementById("exportReportBtn");
+    exportBtn.textContent = "GENERATING...";
+    exportBtn.disabled = true;
+
+    try {
+
+        const response = await fetch(`${API_BASE}/export-report`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                results: lastBatchData.results,
+                aggregate: lastBatchData.aggregate,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error("Failed to generate report");
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "evaluation_report.pdf";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+
+    } catch (error) {
+
+        console.error(error);
+        alert("Could not generate the PDF report. Is the server running?");
+
+    } finally {
+
+        exportBtn.textContent = "EXPORT PDF REPORT";
+        exportBtn.disabled = false;
+
+    }
+
+});
+
+//-------------------------------------
+// Analytics dashboard — chart instances kept here so they
+// can be destroyed and recreated cleanly on every tab visit
+//-------------------------------------
+
+let dimensionChartInstance = null;
+let verdictChartInstance = null;
+let trendChartInstance = null;
+
+const CHART_COLORS = {
+    accent: "#cdbdf0",
+    accentDark: "#ad95e0",
+    green: "#8fe0a8",
+    amber: "#f0c46e",
+    red: "#e07a7a",
+    muted: "#8f8b80",
+};
+
+async function loadAnalytics() {
+
+    try {
+
+        const startDate = document.getElementById("filterStartDate").value;
+        const endDate = document.getElementById("filterEndDate").value;
+        const mode = document.getElementById("filterMode").value;
+
+        const params = new URLSearchParams({ limit: 500 });
+        if (startDate) params.append("start_date", startDate);
+        if (endDate) params.append("end_date", endDate);
+        if (mode) params.append("mode", mode);
+
+        const response = await fetch(`${API_BASE}/analytics?${params.toString()}`);
+
+        if (!response.ok) {
+            throw new Error("Failed to load analytics");
+        }
+
+        const data = await response.json();
+
+        if (!data.total_evaluations || data.total_evaluations === 0) {
+            document.getElementById("analyticsEmptyState").hidden = false;
+            document.getElementById("analyticsSummaryGrid").hidden = true;
+            document.getElementById("analyticsVerdictCountsGrid").hidden = true;
+            document.getElementById("analyticsChartsGrid").hidden = true;
+            document.getElementById("analyticsEmptyState").querySelector("p").textContent =
+                "No evaluations match the current filters.";
+            return;
+        }
+
+        document.getElementById("analyticsEmptyState").hidden = true;
+        document.getElementById("analyticsSummaryGrid").hidden = false;
+        document.getElementById("analyticsVerdictCountsGrid").hidden = false;
+        document.getElementById("analyticsChartsGrid").hidden = false;
+
+        renderAnalyticsSummary(data);
+        renderDimensionChart(data.avg_scores);
+        renderVerdictChart(data.verdict_distribution);
+        renderTrendChart(data.trend);
+
+    } catch (error) {
+
+        console.error(error);
+        document.getElementById("analyticsEmptyState").hidden = false;
+        document.getElementById("analyticsEmptyState").querySelector("p").textContent =
+            "Could not load analytics. Is the server running?";
+
+    }
+
+}
+
+function renderAnalyticsSummary(data) {
+
+    document.getElementById("analyticsTotal").innerHTML = data.total_evaluations;
+    document.getElementById("analyticsPassRate").innerHTML = formatScore(data.pass_rate);
+    document.getElementById("analyticsAvgOverall").innerHTML = formatScore(data.avg_scores.overall);
+    document.getElementById("analyticsHallucFreq").innerHTML = formatScore(data.hallucination_frequency);
+
+    document.getElementById("analyticsPassCount").innerHTML = data.pass_count;
+    document.getElementById("analyticsNeedsImprovementCount").innerHTML = data.needs_improvement_count;
+    document.getElementById("analyticsFailCount").innerHTML = data.fail_count;
+
+}
+
+function renderDimensionChart(avgScores) {
+
+    const ctx = document.getElementById("dimensionChart");
+
+    if (dimensionChartInstance) {
+        dimensionChartInstance.destroy();
+    }
+
+    dimensionChartInstance = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: ["Accuracy", "Relevance", "Completeness", "Overall"],
+            datasets: [{
+                label: "Average Score",
+                data: [
+                    (avgScores.accuracy * 100).toFixed(1),
+                    (avgScores.relevance * 100).toFixed(1),
+                    (avgScores.completeness * 100).toFixed(1),
+                    (avgScores.overall * 100).toFixed(1),
+                ],
+                backgroundColor: [CHART_COLORS.accent, CHART_COLORS.accent, CHART_COLORS.accent, CHART_COLORS.accentDark],
+                borderRadius: 6,
+            }],
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: { color: CHART_COLORS.muted },
+                    grid: { color: "rgba(255,255,255,0.06)" },
+                },
+                x: {
+                    ticks: { color: CHART_COLORS.muted },
+                    grid: { display: false },
+                },
+            },
+        },
+    });
+
+}
+
+function renderVerdictChart(verdictDistribution) {
+
+    const ctx = document.getElementById("verdictChart");
+
+    if (verdictChartInstance) {
+        verdictChartInstance.destroy();
+    }
+
+    const labelColorMap = {
+        "Excellent": CHART_COLORS.green,
+        "Good": CHART_COLORS.accent,
+        "Needs Improvement": CHART_COLORS.amber,
+        "Poor": CHART_COLORS.red,
+    };
+
+    const labels = Object.keys(verdictDistribution);
+    const values = Object.values(verdictDistribution);
+    const colors = labels.map((l) => labelColorMap[l] || CHART_COLORS.muted);
+
+    verdictChartInstance = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+            labels: labels,
+            datasets: [{
+                data: values,
+                backgroundColor: colors,
+                borderWidth: 0,
+            }],
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: "bottom",
+                    labels: { color: CHART_COLORS.muted },
+                },
+            },
+        },
+    });
+
+}
+
+function renderTrendChart(trend) {
+
+    const ctx = document.getElementById("trendChart");
+
+    if (trendChartInstance) {
+        trendChartInstance.destroy();
+    }
+
+    trendChartInstance = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: trend.map((t) => t.date),
+            datasets: [{
+                label: "Avg Overall Score",
+                data: trend.map((t) => (t.avg_overall_score * 100).toFixed(1)),
+                borderColor: CHART_COLORS.accent,
+                backgroundColor: "rgba(205,189,240,0.15)",
+                fill: true,
+                tension: 0.3,
+                pointBackgroundColor: CHART_COLORS.accentDark,
+            }],
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: { color: CHART_COLORS.muted },
+                    grid: { color: "rgba(255,255,255,0.06)" },
+                },
+                x: {
+                    ticks: { color: CHART_COLORS.muted },
+                    grid: { display: false },
+                },
+            },
+        },
     });
 
 }

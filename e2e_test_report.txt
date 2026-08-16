@@ -1,0 +1,54 @@
+END-TO-END TEST REPORT
+AI Response Quality Evaluator
+================================================================================
+
+[PASS] Single evaluation workflow
+       status=200, verdict=Needs Improvement
+
+[PASS] Batch evaluation workflow
+       status=200, rows=2
+
+[PASS] Dashboard updates after new evaluation
+       before=66, after=67
+
+[PASS] Report generation (PDF export)
+       status=200, size=31089 bytes
+
+[PASS] RAG retrieval returns relevant chunks
+       2 chunk(s) retrieved
+
+[PASS] Agent scoring — Relevance
+       score=1.0
+
+[PASS] Agent scoring — Accuracy
+       score=1.0
+
+[PASS] Agent scoring — Completeness
+       score=1.0
+
+[PASS] Agent scoring — Hallucination
+       risk=Low
+
+[PASS] Verdict generation — weighted math
+       expected=1.0, got=1.0
+
+[PASS] Verdict generation — label banding
+       label=Excellent
+
+[PASS] Error handling — malformed batch CSV
+       status=400
+
+[PASS] Error handling — batch row limit exceeded
+       status=400
+
+[PASS] Invalid input — missing required field
+       status=422
+
+[PASS] Invalid input — empty question/answer
+       status=422
+
+[PASS] Invalid input — non-CSV file to batch endpoint
+       status=400
+
+
+SUMMARY: 16/16 tests passed

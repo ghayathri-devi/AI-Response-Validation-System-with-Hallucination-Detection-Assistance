@@ -9,10 +9,15 @@ from accuracy_agent import judge_accuracy
 from hallucination_agent import detect_hallucination
 from completeness_agent import judge_completeness
 from verdict_agent import build_verdict
+from database import save_evaluation
 
 
 MAX_BATCH_ROWS = 20
 
+
+# =====================================================
+# CSV parsing
+# =====================================================
 
 def parse_csv(file_bytes: bytes) -> list[dict]:
     # utf-8-sig strips a BOM if the CSV was exported from Excel
@@ -42,6 +47,10 @@ def parse_csv(file_bytes: bytes) -> list[dict]:
     return rows
 
 
+# =====================================================
+# Evaluate a single row through the full agent pipeline
+# =====================================================
+
 def evaluate_single_row(row: dict) -> dict:
     question = row["question"]
     answer = row["answer"]
@@ -49,7 +58,6 @@ def evaluate_single_row(row: dict) -> dict:
 
     retrieved_context = retrieve_context(question, top_k=2)
 
-    # Run the four independent agent calls concurrently instead of sequentially
     with ThreadPoolExecutor(max_workers=4) as executor:
         relevance_future = executor.submit(judge_relevance, question, answer)
         accuracy_future = executor.submit(judge_accuracy, answer, reference_answer, retrieved_context)
@@ -68,6 +76,43 @@ def evaluate_single_row(row: dict) -> dict:
         hallucination_result=hallucination_result,
     )
 
+    # Build the full evaluation dict — same shape save_evaluation() expects
+    # for single evaluations, so batch rows show up in history/analytics
+    # with the same richness (reasoning, evidence, etc.), not just scores
+    evaluation = {
+        "relevance": relevance_result["relevance_score"],
+        "relevance_reasoning": relevance_result["reasoning"],
+
+        "accuracy": accuracy_result["accuracy_score"],
+        "accuracy_evidence": accuracy_result["evidence"],
+        "accuracy_supporting_excerpt": accuracy_result["supporting_excerpt"],
+
+        "completeness": completeness_result["completeness_score"],
+        "completeness_reasoning": completeness_result["reasoning"],
+        "completeness_missing_aspects": completeness_result["missing_aspects"],
+
+        "hallucination_risk": hallucination_result["hallucination_risk"],
+        "hallucination_flagged_statements": hallucination_result["flagged_statements"],
+        "hallucination_reasoning": hallucination_result["reasoning"],
+
+        "overall_score": verdict_result["overall_score"],
+        "verdict_label": verdict_result["verdict_label"],
+        "verdict_summary": verdict_result["summary"],
+    }
+
+    # Persist this row to Supabase, tagged as a batch submission so the
+    # Analytics dashboard can filter by evaluation mode
+    save_evaluation(
+        question=question,
+        answer=answer,
+        reference_answer=reference_answer,
+        used_source_pdf=False,
+        retrieved_context=retrieved_context,
+        evaluation=evaluation,
+        evaluation_mode="batch",
+    )
+
+    # Return the flattened summary used for the per-row results table
     return {
         "question": question,
         "answer": answer,
@@ -82,6 +127,10 @@ def evaluate_single_row(row: dict) -> dict:
         "verdict_summary": verdict_result["summary"],
     }
 
+
+# =====================================================
+# Aggregate stats across the whole batch
+# =====================================================
 
 def compute_aggregate(results: list[dict]) -> dict:
     if not results:
@@ -113,7 +162,10 @@ def compute_aggregate(results: list[dict]) -> dict:
     }
 
 
-#public entry point
+# =====================================================
+# Public entry point
+# =====================================================
+
 def evaluate_batch(file_bytes: bytes) -> dict:
     rows = parse_csv(file_bytes)
 

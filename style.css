@@ -133,6 +133,20 @@ SIDEBAR
 
 }
 
+.logo-initials{
+
+    font-family:"Oswald", sans-serif;
+
+    font-weight:700;
+
+    font-size:20px;
+
+    letter-spacing:0.02em;
+
+    color:var(--accent-dark);
+
+}
+
 .logo h2{
 
     font-size:26px;
@@ -855,74 +869,6 @@ METRIC GRID
 }
 
 /* ==============================
-BATCH RESULTS TABLE
-============================== */
-
-.batch-table-wrap{
-
-    overflow-x:auto;
-
-    border-radius:14px;
-
-}
-
-.batch-table{
-
-    width:100%;
-
-    border-collapse:collapse;
-
-    background:#121212;
-
-    border-radius:14px;
-
-    overflow:hidden;
-
-}
-
-.batch-table th{
-
-    text-align:left;
-
-    padding:14px 16px;
-
-    background:#1c1c1c;
-
-    color:var(--accent);
-
-    font-family:"JetBrains Mono", monospace;
-
-    font-size:12px;
-
-    text-transform:uppercase;
-
-    letter-spacing:0.05em;
-
-    white-space:nowrap;
-
-}
-
-.batch-table td{
-
-    padding:14px 16px;
-
-    color:var(--text-body);
-
-    font-size:14px;
-
-    border-top:1px solid #262626;
-
-    max-width:320px;
-
-}
-
-.batch-table tbody tr:hover{
-
-    background:#1a1a1a;
-
-}
-
-/* ==============================
 CONTEXT / HISTORY
 ============================== */
 
@@ -996,6 +942,361 @@ CONTEXT / HISTORY
 .context-item p strong{
 
     color:var(--accent);
+
+}
+
+/* ==============================
+SECTION TITLE ROW (title + action button)
+============================== */
+
+.section-title-row{
+
+    display:flex;
+
+    align-items:center;
+
+    justify-content:space-between;
+
+    flex-wrap:wrap;
+
+    gap:14px;
+
+    margin-bottom:22px;
+
+}
+
+.section-title-row .section-title{
+
+    margin-bottom:0;
+
+}
+
+.export-btn{
+
+    background:none;
+
+    border:1px solid var(--accent);
+
+    color:var(--accent);
+
+    border-radius:999px;
+
+    padding:11px 22px;
+
+    font-family:"JetBrains Mono", monospace;
+
+    font-size:12.5px;
+
+    font-weight:700;
+
+    letter-spacing:0.06em;
+
+    cursor:pointer;
+
+    transition:.2s;
+
+}
+
+.export-btn:hover{
+
+    background:var(--accent);
+
+    color:#2a2138;
+
+}
+
+.export-btn:disabled{
+
+    opacity:0.5;
+
+    cursor:not-allowed;
+
+}
+
+/* ==============================
+BATCH RESULTS TABLE
+============================== */
+
+.batch-table-wrap{
+
+    overflow-x:auto;
+
+    border-radius:14px;
+
+}
+
+.batch-table{
+
+    width:100%;
+
+    border-collapse:collapse;
+
+    background:#121212;
+
+    border-radius:14px;
+
+    overflow:hidden;
+
+}
+
+.batch-table th{
+
+    text-align:left;
+
+    padding:14px 16px;
+
+    background:#1c1c1c;
+
+    color:var(--accent);
+
+    font-family:"JetBrains Mono", monospace;
+
+    font-size:12px;
+
+    text-transform:uppercase;
+
+    letter-spacing:0.05em;
+
+    white-space:nowrap;
+
+}
+
+.batch-table td{
+
+    padding:14px 16px;
+
+    color:var(--text-body);
+
+    font-size:14px;
+
+    border-top:1px solid #262626;
+
+    max-width:320px;
+
+}
+
+.batch-table tbody tr:hover{
+
+    background:#1a1a1a;
+
+}
+
+/* ==============================
+ANALYTICS FILTERS
+============================== */
+
+.analytics-filters{
+
+    margin-bottom:26px;
+
+}
+
+.analytics-filters h2{
+
+    margin-bottom:20px;
+
+    color:var(--text-heading);
+
+    font-size:20px;
+
+    font-family:"Oswald", sans-serif;
+
+    font-weight:600;
+
+    letter-spacing:0.02em;
+
+    text-transform:uppercase;
+
+}
+
+.filter-row{
+
+    display:flex;
+
+    align-items:flex-end;
+
+    gap:18px;
+
+    flex-wrap:wrap;
+
+}
+
+.filter-field{
+
+    display:flex;
+
+    flex-direction:column;
+
+    min-width:160px;
+
+}
+
+.filter-field label{
+
+    margin:0 0 8px;
+
+    font-size:13px;
+
+}
+
+.filter-field input[type="date"],
+.filter-field select{
+
+    background:#a192a1;
+
+    border:1px solid #333;
+
+    border-radius:10px;
+
+    padding:11px 14px;
+
+    color:rgb(20, 6, 18);
+
+    font-size:14px;
+
+    font-family:"JetBrains Mono",monospace;
+
+}
+
+.filter-actions{
+
+    flex-direction:row;
+
+    gap:10px;
+
+    min-width:auto;
+
+}
+
+.filter-actions button{
+
+    border:none;
+
+    border-radius:10px;
+
+    padding:12px 20px;
+
+    font-family:"JetBrains Mono", monospace;
+
+    font-size:13px;
+
+    font-weight:700;
+
+    letter-spacing:0.06em;
+
+    cursor:pointer;
+
+    transition:.2s;
+
+}
+
+#applyFiltersBtn{
+
+    background:var(--accent);
+
+    color:#2a2138;
+
+}
+
+#applyFiltersBtn:hover{
+
+    background:var(--accent-dark);
+
+}
+
+.filter-clear-btn{
+
+    background:#3a3344;
+
+    color:var(--white);
+
+}
+
+.filter-clear-btn:hover{
+
+    background:#4a4258;
+
+}
+
+/* ==============================
+VERDICT COUNT CARDS
+============================== */
+
+.verdict-count-pass{
+
+    border-left:4px solid #8fe0a8;
+
+}
+
+.verdict-count-pass .metric{
+
+    color:#8fe0a8;
+
+}
+
+.verdict-count-needs-improvement{
+
+    border-left:4px solid #f0c46e;
+
+}
+
+.verdict-count-needs-improvement .metric{
+
+    color:#f0c46e;
+
+}
+
+.verdict-count-fail{
+
+    border-left:4px solid #e07a7a;
+
+}
+
+.verdict-count-fail .metric{
+
+    color:#e07a7a;
+
+}
+
+/* ==============================
+ANALYTICS CHARTS
+============================== */
+
+.chart-grid{
+
+    display:grid;
+
+    grid-template-columns:1fr 1fr;
+
+    gap:22px;
+
+}
+
+.chart-card{
+
+    min-height:320px;
+
+}
+
+.chart-card canvas{
+
+    max-height:280px;
+
+}
+
+.chart-card-wide{
+
+    grid-column:1 / -1;
+
+}
+
+@media(max-width:900px){
+
+.chart-grid{
+
+grid-template-columns:1fr;
+
+}
 
 }
 

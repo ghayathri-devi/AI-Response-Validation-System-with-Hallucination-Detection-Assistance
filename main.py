@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
 
 from retrieval_agent import retrieve_context
@@ -12,12 +13,14 @@ from hallucination_agent import detect_hallucination
 from completeness_agent import judge_completeness
 from verdict_agent import build_verdict
 from batch_evaluator import evaluate_batch
-from database import init_db, save_evaluation, get_history
+from analytics import compute_analytics
+from report_generator import generate_report_pdf
+from database import init_db, save_evaluation, get_history, get_all_evaluations
 
 
 app = FastAPI(
     title="AI Response Quality Evaluator",
-    version="3.0"
+    version="4.0"
 )
 
 app.add_middleware(
@@ -80,6 +83,7 @@ async def evaluate(
     hallucination_result = detect_hallucination(
         answer=answer,
         contexts=retrieved_context,
+        reference_answer=reference_answer,
     )
 
     # --- Completeness Judge Agent ---
@@ -123,6 +127,7 @@ async def evaluate(
         used_source_pdf=used_source_pdf,
         retrieved_context=retrieved_context,
         evaluation=evaluation,
+        evaluation_mode="single",
     )
 
     return {
@@ -146,8 +151,9 @@ def history(limit: int = 20):
 async def batch_evaluate(csv_file: UploadFile = File(...)):
     """
     Accepts a CSV of question/answer (and optional reference_answer) pairs,
-    evaluates each row through the full agent pipeline, and returns both
-    per-row results and aggregated statistics across the batch.
+    evaluates each row through the full agent pipeline, persists each row
+    to Supabase (tagged evaluation_mode='batch'), and returns both per-row
+    results and aggregated statistics across the batch.
     """
 
     if not csv_file.filename.lower().endswith(".csv"):
@@ -166,3 +172,55 @@ async def batch_evaluate(csv_file: UploadFile = File(...)):
         "results": result["results"],
         "aggregate": result["aggregate"],
     }
+
+
+@app.get("/analytics")
+def analytics(
+    limit: int = 500,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    mode: Optional[str] = None,
+):
+    """
+    Powers the Evaluation Scoring Dashboard: pass/needs-improvement/fail
+    counts, average per-dimension scores, hallucination frequency, verdict
+    distribution, and a quality trend over time — computed across stored
+    evaluations, optionally filtered by date range and/or evaluation mode
+    (single vs batch).
+
+    Query params (all optional):
+      start_date=YYYY-MM-DD
+      end_date=YYYY-MM-DD
+      mode=single | batch
+    """
+    evaluations = get_all_evaluations(limit=limit, start_date=start_date, end_date=end_date, mode=mode)
+    stats = compute_analytics(evaluations)
+
+    return {
+        "status": "success",
+        **stats,
+    }
+
+
+@app.post("/export-report")
+async def export_report(payload: dict):
+    """
+    Generates a structured PDF report from an already-completed batch
+    evaluation. Expects the same JSON shape the frontend already has after
+    a /batch-evaluate call: { "results": [...], "aggregate": {...} }.
+    No new LLM calls are made — this only formats data that was already
+    computed and displayed in the Batch tab.
+    """
+    results = payload.get("results")
+    aggregate = payload.get("aggregate")
+
+    if not results or not aggregate:
+        raise HTTPException(status_code=400, detail="Request must include 'results' and 'aggregate' from a completed batch evaluation")
+
+    pdf_bytes = generate_report_pdf(results, aggregate)
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=evaluation_report.pdf"},
+    )

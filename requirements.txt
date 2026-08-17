@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pypdf
+sentence-transformers==2.7.0
+chromadb
+datasets
+langchain-groq
+python-dotenv
+json-repair
+supabase
+reportlab
+matplotlib

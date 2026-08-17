@@ -1,51 +1,21 @@
-from sentence_transformers import SentenceTransformer
 import chromadb
 
-# -----------------------------
-# Load embedding model
-# -----------------------------
-model = SentenceTransformer("all-MiniLM-L6-v2")
+from knowledge_builder import CHROMA_PATH, COLLECTION_NAME, get_embedding_model
 
-# -----------------------------
-# Connect to ChromaDB
-# -----------------------------
-client = chromadb.PersistentClient(
-    path="./chroma_db"
-)
-
-# -----------------------------
-# Load collection
-# -----------------------------
-collection = client.get_collection(
-    name="knowledge_base"
-)
+_client = chromadb.PersistentClient(path=CHROMA_PATH)
+_collection = _client.get_or_create_collection(name=COLLECTION_NAME)
 
 
-def retrieve_context(question, top_k=3):
-    """
-    Retrieve the most relevant context chunks.
-    """
+def retrieve_context(question: str, top_k: int = 2) -> list[str]:
+    model = get_embedding_model()
+    query_embedding = model.encode([question]).tolist()
 
-    query_embedding = model.encode(question).tolist()
-
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k
+    results = _collection.query(
+        query_embeddings=query_embedding,
+        n_results=top_k,
     )
 
+    if not results.get("documents"):
+        return []
+
     return results["documents"][0]
-
-
-# -----------------------------
-# Test
-# -----------------------------
-if __name__ == "__main__":
-
-    question = input("Enter a question: ")
-
-    contexts = retrieve_context(question)
-
-    print("\nRetrieved Context:\n")
-
-    for i, context in enumerate(contexts, 1):
-        print(f"{i}. {context}\n")

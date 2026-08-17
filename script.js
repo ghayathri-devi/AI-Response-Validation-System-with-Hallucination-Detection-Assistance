@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "";
 const EVALUATE_URL = `${API_BASE}/evaluate`;
 const HISTORY_URL = `${API_BASE}/history`;
 

@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pypdf import PdfReader
 
 from retrieval_agent import retrieve_context
@@ -15,6 +16,7 @@ from verdict_agent import build_verdict
 from batch_evaluator import evaluate_batch
 from analytics import compute_analytics
 from report_generator import generate_report_pdf
+from knowledge_builder import build_knowledge_base
 from database import init_db, save_evaluation, get_history, get_all_evaluations
 
 
@@ -33,9 +35,17 @@ app.add_middleware(
 
 init_db()
 
+# Rebuild the RAG knowledge base on startup. On Render's free tier the
+# filesystem is wiped on every redeploy/spin-down, so chroma_db never
+# persists between deployments — this recreates it fresh every time the
+# server starts. build_knowledge_base() is a no-op if data already exists
+# (relevant for local development, where you don't want to re-embed
+# everything on every restart).
+build_knowledge_base()
 
-@app.get("/")
-def home():
+
+@app.get("/api/health")
+def health():
     return {
         "message": "AI Response Quality Evaluator API Running"
     }
@@ -224,3 +234,10 @@ async def export_report(payload: dict):
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=evaluation_report.pdf"},
     )
+
+
+# Serves index.html, style.css, script.js directly from FastAPI.
+# Must be mounted LAST — routes above are matched first, and this
+# static mount only catches whatever isn't already an API route
+# (including "/" itself, via html=True).
+app.mount("/", StaticFiles(directory=".", html=True), name="static")

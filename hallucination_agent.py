@@ -17,7 +17,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 # =====================================================
 
 groq_llm = ChatGroq(
-    model="llama-3.1-8b-instant",
+    model="openai/gpt-oss-120b",
     groq_api_key=os.getenv("GROQ_API_KEY"),
     temperature=0,
 )

@@ -9,8 +9,8 @@ CHROMA_PATH = "./chroma_db"
 COLLECTION_NAME = "knowledge_base"
 CHUNK_SIZE = 100
 
-WIKI_ARTICLE_LIMIT = int(os.getenv("WIKI_ARTICLE_LIMIT", "150"))
-SQUAD_ROW_LIMIT = int(os.getenv("SQUAD_ROW_LIMIT", "500"))
+WIKI_ARTICLE_LIMIT = int(os.getenv("WIKI_ARTICLE_LIMIT", "60"))
+SQUAD_ROW_LIMIT = int(os.getenv("SQUAD_ROW_LIMIT", "200"))
 
 _model = None
 
@@ -65,7 +65,7 @@ def build_knowledge_base(force_rebuild: bool = False):
 
     print(f"Embedding {len(all_chunks)} chunks...")
     model = get_embedding_model()
-    embeddings = model.encode(all_chunks, show_progress_bar=True, batch_size=64)
+    embeddings = model.encode(all_chunks, show_progress_bar=True, batch_size=16)
 
     BATCH_SIZE = 5000
     for i in range(0, len(all_chunks), BATCH_SIZE):

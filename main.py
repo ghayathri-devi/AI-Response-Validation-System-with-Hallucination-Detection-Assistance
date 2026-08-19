@@ -1,4 +1,5 @@
 import io
+import threading
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
@@ -41,7 +42,15 @@ init_db()
 # server starts. build_knowledge_base() is a no-op if data already exists
 # (relevant for local development, where you don't want to re-embed
 # everything on every restart).
-build_knowledge_base()
+#
+# Runs in a background thread rather than blocking here — Render (and
+# similar platforms) expect the app to open its port quickly after
+# startup, and running this synchronously delayed that past the health
+# check's patience, causing "No open ports detected" failures. Running
+# it in the background lets uvicorn bind the port immediately; requests
+# that need retrieval before the build finishes will just get no
+# context back until it completes (a few minutes at most).
+threading.Thread(target=build_knowledge_base, daemon=True).start()
 
 
 @app.get("/api/health")

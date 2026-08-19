@@ -1,5 +1,21 @@
+"""
+knowledge_builder.py
+
+Builds the RAG knowledge base (SQuAD + Wikipedia, chunked and embedded
+into ChromaDB). Runs automatically on every server startup, since
+Render's free tier wipes local files (including chroma_db/) on every
+redeploy or spin-down/spin-up cycle.
+
+WIKI_ARTICLE_LIMIT is intentionally small by default (150, down from the
+original 1000) so this rebuild finishes quickly on Render's constrained
+free-tier CPU. Increase it via the WIKI_ARTICLE_LIMIT environment
+variable once persistent storage is in place, if broader coverage is
+needed later.
+"""
+
 import os
 import shutil
+import itertools
 
 import chromadb
 from sentence_transformers import SentenceTransformer
@@ -50,12 +66,20 @@ def build_knowledge_base(force_rebuild: bool = False):
     print("Building knowledge base...")
 
     print(f"Loading SQuAD (first {SQUAD_ROW_LIMIT} rows)...")
-    squad = load_dataset("rajpurkar/squad", split=f"train[:{SQUAD_ROW_LIMIT}]")
-    squad_contexts = list(set(squad["context"]))
+    # streaming=True here too — non-streaming loads were caching far more
+    # data to disk than needed for a small slice, which caused a separate
+    # "temporary storage exceeded" failure during deploy
+    squad_stream = load_dataset("rajpurkar/squad", split="train", streaming=True)
+    squad_rows = list(itertools.islice(squad_stream, SQUAD_ROW_LIMIT))
+    squad_contexts = list(set(row["context"] for row in squad_rows))
 
     print(f"Loading {WIKI_ARTICLE_LIMIT} Wikipedia articles...")
-    wiki = load_dataset("wikimedia/wikipedia", "20231101.en", split=f"train[:{WIKI_ARTICLE_LIMIT}]")
-    wiki_texts = list(wiki["text"])
+    # streaming=True avoids downloading full data shards just to grab a
+    # small slice — this was the main source of slow startup, since even
+    # requesting only 60 articles via train[:60] could pull down much
+    # more data than needed without streaming
+    wiki_stream = load_dataset("wikimedia/wikipedia", "20231101.en", split="train", streaming=True)
+    wiki_texts = [row["text"] for row in itertools.islice(wiki_stream, WIKI_ARTICLE_LIMIT)]
 
     all_documents = squad_contexts + wiki_texts
 

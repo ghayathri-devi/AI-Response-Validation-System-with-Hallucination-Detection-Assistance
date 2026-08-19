@@ -30,6 +30,14 @@ SQUAD_ROW_LIMIT = int(os.getenv("SQUAD_ROW_LIMIT", "200"))
 
 _model = None
 
+# One shared ChromaDB client for the whole app — both this file (building
+# the knowledge base) and retrieval_agent.py (querying it) use this exact
+# same connection. Previously each created its own separate client, which
+# could fail to see the other's writes reliably (two connections to the
+# same on-disk store, opened at different times). Sharing one connection
+# avoids that entirely.
+_chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+
 
 def get_embedding_model():
     """Loads the embedding model once and reuses it across the app,
@@ -56,7 +64,7 @@ def build_knowledge_base(force_rebuild: bool = False):
     if force_rebuild and os.path.exists(CHROMA_PATH):
         shutil.rmtree(CHROMA_PATH)
 
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
+    client = _chroma_client
     collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
     if collection.count() > 0:

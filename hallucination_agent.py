@@ -11,10 +11,12 @@ from typing import Optional
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 
+try:
+    from json_repair import repair_json
+    _HAS_JSON_REPAIR = True
+except ImportError:
+    _HAS_JSON_REPAIR = False
 
-# =====================================================
-# Groq LLM — one call per evaluation
-# =====================================================
 
 groq_llm = ChatGroq(
     model="openai/gpt-oss-120b",
@@ -22,10 +24,6 @@ groq_llm = ChatGroq(
     temperature=0,
 )
 
-
-# =====================================================
-# Prompt
-# =====================================================
 
 SYSTEM_PROMPT = """You are a strict hallucination-detection judge. You check an AI-generated \
 answer against retrieved source content to find claims that are NOT supported by that source \
@@ -55,6 +53,10 @@ Risk guide:
 - High = most or all claims are unsupported, or directly contradict the source content
 
 If flagged_statements is empty, hallucination_risk must be "Low".
+
+IMPORTANT: Your entire response must be valid JSON. Never use double-quote characters (") inside \
+string values — use single quotes (') instead if you need to quote text. Do not include line \
+breaks inside string values.
 """
 
 
@@ -74,12 +76,49 @@ def _build_user_prompt(answer: str, context_text: str) -> str:
 
 
 def _parse_json_response(raw_text: str) -> dict:
-    match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-    if not match:
-        raise ValueError("No JSON object found in response")
-    return json.loads(match.group(0))
+    """
+    Reasoning models like gpt-oss can prepend explanatory text before the
+    actual JSON answer. A naive greedy regex from the first "{" to the
+    last "}" can accidentally span across that preamble AND the real JSON,
+    producing an unparseable blob even repair_json can't fix. Try the
+    LAST brace-delimited candidate first, since the real answer usually
+    comes after any reasoning, not before it.
+    """
+    candidates = re.findall(r"\{.*?\}(?=\s*$|\s*\{)|\{.*\}", raw_text, re.DOTALL)
+    if not candidates:
+        candidates = [raw_text]
+
+    for candidate in reversed(candidates):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        if _HAS_JSON_REPAIR:
+            try:
+                repaired = repair_json(candidate, return_objects=True)
+                if isinstance(repaired, dict) and repaired.get("hallucination_risk") is not None:
+                    return repaired
+            except Exception:
+                pass
+
+    if _HAS_JSON_REPAIR:
+        try:
+            repaired = repair_json(raw_text, return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                return repaired
+        except Exception:
+            pass
+
+    print(f"  Hallucination agent: could not parse JSON from response: {raw_text[:300]!r}")
+    raise ValueError("Could not parse a valid JSON object from the response")
 
 
+# =====================================================
+# Grounding safety net — verifies each LLM-flagged claim
+# against the actual retrieved text using string matching,
+# to catch cases where the LLM contradicts itself and flags
+# something that is, in fact, directly present in the source.
+# =====================================================
 
 def _normalize(text: str) -> str:
     text = text.lower().strip()
@@ -95,12 +134,9 @@ def _is_actually_grounded(statement: str, context_text: str, threshold: float = 
     if not norm_stmt or not norm_ctx:
         return False
 
-    # Exact or near-exact substring match
     if norm_stmt in norm_ctx:
         return True
 
-    # Fuzzy fallback: find the longest matching block between the
-    # claim and the context, and see how much of the claim it covers
     matcher = difflib.SequenceMatcher(None, norm_ctx, norm_stmt)
     match = matcher.find_longest_match(0, len(norm_ctx), 0, len(norm_stmt))
     overlap_ratio = match.size / max(1, len(norm_stmt))
@@ -111,19 +147,18 @@ def _is_actually_grounded(statement: str, context_text: str, threshold: float = 
 def _verify_flagged_statements(flagged: list[str], context_text: str) -> tuple[list[str], int]:
     """Returns (corrected_flagged_list, number_removed_as_false_positive)."""
     if not context_text.strip():
-        return flagged, 0  # nothing to verify against, trust the LLM as-is
+        return flagged, 0
 
     verified = []
     removed = 0
     for statement in flagged:
         if _is_actually_grounded(statement, context_text):
-            removed += 1  # false positive — actually found in the source, drop it
+            removed += 1
         else:
             verified.append(statement)
 
     return verified, removed
 
-#if llm fails
 
 def _fallback_hallucination(context_text: str) -> dict:
     if not context_text.strip():
@@ -139,23 +174,11 @@ def _fallback_hallucination(context_text: str) -> dict:
     }
 
 
-
-# Public function
-
-
 def detect_hallucination(answer: str, contexts: list[str], reference_answer: Optional[str] = None) -> dict:
     """
     Checks `answer` claim by claim against the retrieved `contexts` AND the
     reference answer (if provided), flagging any specific statements that
-    are not supported by EITHER source. Combining both sources matters:
-    retrieval can miss relevant chunks for general-knowledge questions that
-    aren't well covered in the indexed dataset, and without this, a fully
-    correct answer with a valid reference could get falsely flagged just
-    because retrieval happened to return irrelevant context.
-
-    LLM-flagged claims are cross-checked against the raw combined source
-    text with string matching before being finalized, to catch LLM
-    reasoning errors where it flags something that is actually present.
+    are not supported by EITHER source.
 
     Returns:
         {
@@ -198,8 +221,6 @@ def detect_hallucination(answer: str, contexts: list[str], reference_answer: Opt
             flagged = []
         flagged = [str(item).strip() for item in flagged if str(item).strip()]
 
-        # Grounding safety net: remove any flagged claim that is actually
-        # present in the combined context/reference (LLM false positive)
         flagged, num_removed = _verify_flagged_statements(flagged, context_text)
 
         reasoning = str(parsed.get("reasoning", "")).strip() or "No reasoning provided."
@@ -210,7 +231,6 @@ def detect_hallucination(answer: str, contexts: list[str], reference_answer: Opt
                 f"directly present in the retrieved context or reference answer and removed as false positives.)"
             )
 
-        # Recompute risk based on the corrected flagged list
         if len(flagged) == 0:
             risk = "Low"
         elif risk == "Low" and flagged:
@@ -229,8 +249,6 @@ def detect_hallucination(answer: str, contexts: list[str], reference_answer: Opt
 
 
 if __name__ == "__main__":
-    # Quick standalone test — reference_answer confirms "Paris" is correct
-    # even though contexts (simulating a retrieval miss) has nothing relevant
     result = detect_hallucination(
         answer="Paris is the capital of France.",
         contexts=["This chunk is about something completely unrelated to France."],

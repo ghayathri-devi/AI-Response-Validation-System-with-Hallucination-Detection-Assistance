@@ -9,7 +9,8 @@ from typing import Optional
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import util
+from knowledge_builder import get_embedding_model
 
 try:
     from json_repair import repair_json
@@ -35,10 +36,8 @@ groq_llm = ChatGroq(
 # or returns something unparsable, so the API never breaks)
 # =====================================================
 
-st_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-
 def _fallback_accuracy(answer: str, ground_truth: str) -> dict:
+    st_model = get_embedding_model()
     emb_a = st_model.encode(answer, convert_to_tensor=True)
     emb_b = st_model.encode(ground_truth, convert_to_tensor=True)
     score = float(util.cos_sim(emb_a, emb_b).item())
@@ -80,15 +79,17 @@ Respond with ONLY a JSON object, no other text, in exactly this format:
 
 Scoring guide — score based on the MIX of claim categories above, not an all-or-nothing judgment:
 - 1.0 = all claims are SUPPORTED
-- 0.7-0.9 = most claims SUPPORTED, at most one UNSTATED-but-reasonable claim, nothing CONTRADICTED
-- 0.4-0.6 = a mix of SUPPORTED and UNSTATED claims, nothing CONTRADICTED
-- 0.2-0.3 = mostly UNSTATED claims with no supporting evidence, but still nothing CONTRADICTED
-- 0.0-0.1 = reserved ONLY for claims that are CONTRADICTED by the ground truth, or answers with \
+- 0.8-0.95 = most claims SUPPORTED, some UNSTATED-but-reasonable claims, nothing CONTRADICTED
+- 0.6-0.8 = a mix of SUPPORTED and UNSTATED claims, nothing CONTRADICTED
+- 0.4-0.6 = mostly UNSTATED claims with no supporting evidence, but still nothing CONTRADICTED — \
+  these claims are simply unconfirmed by the available source, not wrong, and should not be \
+  scored as if they were
+- 0.0-0.15 = reserved ONLY for claims that are CONTRADICTED by the ground truth, or answers with \
   no plausible connection to the topic at all
 
-IMPORTANT: Do NOT score 0.0 just because a claim is not explicitly stated in the ground truth. \
-An UNSTATED claim that is reasonable and not contradicted should still receive partial credit \
-(0.2 or higher), never zero. Reserve 0.0 strictly for direct contradictions.
+IMPORTANT: Do NOT score low just because a claim is not explicitly stated in the ground truth. \
+An UNSTATED claim that is reasonable and not contradicted should still receive meaningful partial \
+credit (0.4 or higher), never near zero. Reserve scores below 0.2 strictly for direct contradictions.
 
 IMPORTANT: Keep "evidence" and "supporting_excerpt" SHORT — evidence under 40 words, \
 supporting_excerpt under 20 words. Do not list every claim individually; summarize.
@@ -108,22 +109,40 @@ def _build_user_prompt(answer: str, ground_truth: str, source_label: str) -> str
 
 
 def _parse_json_response(raw_text: str) -> dict:
-    match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-    candidate = match.group(0) if match else raw_text
+    """
+    Reasoning models like gpt-oss can prepend explanatory text before the
+    actual JSON answer. A naive greedy regex from the first "{" to the
+    last "}" can accidentally span across that preamble AND the real JSON,
+    producing an unparseable blob even repair_json can't fix. Try the
+    LAST brace-delimited candidate first, since the real answer usually
+    comes after any reasoning, not before it.
+    """
+    candidates = re.findall(r"\{.*?\}(?=\s*$|\s*\{)|\{.*\}", raw_text, re.DOTALL)
+    if not candidates:
+        candidates = [raw_text]
 
-    # First try strict parsing
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
-        pass
+    for candidate in reversed(candidates):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        if _HAS_JSON_REPAIR:
+            try:
+                repaired = repair_json(candidate, return_objects=True)
+                if isinstance(repaired, dict) and repaired.get("accuracy_score") is not None:
+                    return repaired
+            except Exception:
+                pass
 
-    # Fall back to a tolerant repair pass — handles stray quotes, trailing
-    # commas, and other minor malformations small LLMs sometimes produce
     if _HAS_JSON_REPAIR:
-        repaired = repair_json(candidate, return_objects=True)
-        if isinstance(repaired, dict) and repaired:
-            return repaired
+        try:
+            repaired = repair_json(raw_text, return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                return repaired
+        except Exception:
+            pass
 
+    print(f"  Accuracy agent: could not parse JSON from response: {raw_text[:300]!r}")
     raise ValueError("Could not parse a valid JSON object from the response")
 
 
@@ -198,7 +217,7 @@ def judge_accuracy(
         }
 
     last_error = None
-    for attempt in range(2):  # try once, retry once on parse failure
+    for attempt in range(2):
         try:
             result = _call_llm_once(answer, ground_truth, source_label)
             result["used_reference_answer"] = has_reference
@@ -207,7 +226,6 @@ def judge_accuracy(
             last_error = e
             continue
 
-    # Both attempts failed — fall back to local scoring
     result = _fallback_accuracy(answer, ground_truth)
     result["evidence"] += f" (LLM judge error after retry: {type(last_error).__name__})"
     result["used_reference_answer"] = has_reference
@@ -215,7 +233,6 @@ def judge_accuracy(
 
 
 if __name__ == "__main__":
-    # Quick standalone test
     result = judge_accuracy(
         answer="Artificial Intelligence (AI) is the ability of a computer or machine to perform tasks that normally require human intelligence. These tasks include learning, reasoning, understanding language, recognising images and speech, making decisions, and solving problems.",
         reference_answer=None,

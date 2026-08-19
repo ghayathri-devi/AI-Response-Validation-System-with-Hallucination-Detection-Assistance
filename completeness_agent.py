@@ -8,7 +8,14 @@ import re
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import util
+from knowledge_builder import get_embedding_model
+
+try:
+    from json_repair import repair_json
+    _HAS_JSON_REPAIR = True
+except ImportError:
+    _HAS_JSON_REPAIR = False
 
 
 groq_llm = ChatGroq(
@@ -17,10 +24,9 @@ groq_llm = ChatGroq(
     temperature=0,
 )
 
-st_model = SentenceTransformer("all-MiniLM-L6-v2")
-
 
 def _fallback_completeness(question: str, answer: str) -> dict:
+    st_model = get_embedding_model()
     emb_a = st_model.encode(question, convert_to_tensor=True)
     emb_b = st_model.encode(answer, convert_to_tensor=True)
     score = float(util.cos_sim(emb_a, emb_b).item())
@@ -75,10 +81,48 @@ def _build_user_prompt(question: str, answer: str) -> str:
 
 
 def _parse_json_response(raw_text: str) -> dict:
-    match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-    if not match:
-        raise ValueError("No JSON object found in response")
-    return json.loads(match.group(0))
+    """
+    Reasoning models like gpt-oss can prepend explanatory text before the
+    actual JSON answer. A naive greedy regex from the first "{" to the
+    last "}" can accidentally span across that preamble AND the real JSON,
+    producing an unparseable blob even repair_json can't fix. To handle
+    this: find ALL brace-delimited candidates and try the LAST one first
+    (the actual answer usually comes after any reasoning), falling back
+    through earlier candidates and finally the raw repair_json pass.
+    """
+    candidates = re.findall(r"\{.*?\}(?=\s*$|\s*\{)|\{.*\}", raw_text, re.DOTALL)
+    if not candidates:
+        candidates = [raw_text]
+
+    # Try candidates last-first — reasoning models usually put the real
+    # structured answer after any thinking/preamble text, not before it
+    for candidate in reversed(candidates):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        if _HAS_JSON_REPAIR:
+            try:
+                repaired = repair_json(candidate, return_objects=True)
+                if isinstance(repaired, dict) and repaired.get("completeness_score") is not None:
+                    return repaired
+            except Exception:
+                pass
+
+    # Last resort: let repair_json try the entire raw response as-is,
+    # since its own extraction logic is sometimes smarter than ours
+    if _HAS_JSON_REPAIR:
+        try:
+            repaired = repair_json(raw_text, return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                return repaired
+        except Exception:
+            pass
+
+    # Nothing worked — log what we actually got, so the next failure is
+    # diagnosable instead of a mystery
+    print(f"  Completeness agent: could not parse JSON from response: {raw_text[:300]!r}")
+    raise ValueError("Could not parse a valid JSON object from the response")
 
 
 def _call_llm_once(question: str, answer: str) -> dict:
@@ -98,7 +142,6 @@ def _call_llm_once(question: str, answer: str) -> dict:
         missing = []
     missing = [str(item).strip() for item in missing if str(item).strip()]
 
-    # Self-consistency guard: score and missing_aspects should not contradict each other
     if not missing and score < 0.85:
         score = 0.85
     if missing and score >= 0.85:
@@ -110,8 +153,22 @@ def _call_llm_once(question: str, answer: str) -> dict:
         "missing_aspects": missing,
     }
 
+
 def judge_completeness(question: str, answer: str) -> dict:
-    
+    """
+    Checks whether `answer` covers every distinct aspect of `question`,
+    with reasoning and a list of any missing aspects, using a single LLM
+    call (retried once if the first response isn't valid JSON before
+    falling back to local scoring).
+
+    Returns:
+        {
+            "completeness_score": float (0.0-1.0),
+            "reasoning": str,
+            "missing_aspects": list[str]
+        }
+    """
+
     if not question.strip() or not answer.strip():
         return {
             "completeness_score": 0.0,
@@ -120,14 +177,13 @@ def judge_completeness(question: str, answer: str) -> dict:
         }
 
     last_error = None
-    for attempt in range(2):  # try once, retry once on parse failure
+    for attempt in range(2):
         try:
             return _call_llm_once(question, answer)
         except Exception as e:
             last_error = e
             continue
 
-    # Both attempts failed — fall back to local scoring
     result = _fallback_completeness(question, answer)
     result["reasoning"] += f" (LLM judge error after retry: {type(last_error).__name__})"
     return result

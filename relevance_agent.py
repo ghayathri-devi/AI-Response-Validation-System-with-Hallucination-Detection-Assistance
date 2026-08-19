@@ -8,7 +8,14 @@ import re
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import util
+from knowledge_builder import get_embedding_model
+
+try:
+    from json_repair import repair_json
+    _HAS_JSON_REPAIR = True
+except ImportError:
+    _HAS_JSON_REPAIR = False
 
 groq_llm = ChatGroq(
     model="openai/gpt-oss-120b",
@@ -16,11 +23,12 @@ groq_llm = ChatGroq(
     temperature=0,
 )
 
-#if llm fails 
-st_model = SentenceTransformer("all-MiniLM-L6-v2")
+#if llm fails, uses the shared embedding model (avoids loading a
+# duplicate copy of the model — important for memory on constrained hosts)
 
 
 def _fallback_relevance(question: str, answer: str) -> dict:
+    st_model = get_embedding_model()
     emb_a = st_model.encode(question, convert_to_tensor=True)
     emb_b = st_model.encode(answer, convert_to_tensor=True)
     score = float(util.cos_sim(emb_a, emb_b).item())
@@ -52,13 +60,41 @@ def _build_user_prompt(question: str, answer: str) -> str:
 
 
 def _parse_json_response(raw_text: str) -> dict:
-    # Model sometimes wraps JSON in markdown fences or adds stray text — extract the {...} block
-    match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-    if not match:
-        raise ValueError("No JSON object found in response")
-    return json.loads(match.group(0))
+    """
+    Reasoning models like gpt-oss can prepend explanatory text before the
+    actual JSON answer. A naive greedy regex from the first "{" to the
+    last "}" can accidentally span across that preamble AND the real JSON,
+    producing an unparseable blob even repair_json can't fix. Try the
+    LAST brace-delimited candidate first, since the real answer usually
+    comes after any reasoning, not before it.
+    """
+    candidates = re.findall(r"\{.*?\}(?=\s*$|\s*\{)|\{.*\}", raw_text, re.DOTALL)
+    if not candidates:
+        candidates = [raw_text]
 
+    for candidate in reversed(candidates):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        if _HAS_JSON_REPAIR:
+            try:
+                repaired = repair_json(candidate, return_objects=True)
+                if isinstance(repaired, dict) and repaired.get("relevance_score") is not None:
+                    return repaired
+            except Exception:
+                pass
 
+    if _HAS_JSON_REPAIR:
+        try:
+            repaired = repair_json(raw_text, return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                return repaired
+        except Exception:
+            pass
+
+    print(f"  Relevance agent: could not parse JSON from response: {raw_text[:300]!r}")
+    raise ValueError("Could not parse a valid JSON object from the response")
 
 
 def judge_relevance(question: str, answer: str) -> dict:

@@ -6,11 +6,12 @@ into ChromaDB). Runs automatically on every server startup, since
 Render's free tier wipes local files (including chroma_db/) on every
 redeploy or spin-down/spin-up cycle.
 
-WIKI_ARTICLE_LIMIT is intentionally small by default (150, down from the
-original 1000) so this rebuild finishes quickly on Render's constrained
-free-tier CPU. Increase it via the WIKI_ARTICLE_LIMIT environment
-variable once persistent storage is in place, if broader coverage is
-needed later.
+WIKI_ARTICLE_LIMIT was previously shrunk down to keep startup fast on
+Render's free tier (512MB RAM, 0.1 vCPU). Now running on Standard tier
+(2GB RAM), these are restored to the original full-size knowledge base
+for genuinely broad topic coverage. The build still runs in a background
+thread (see main.py), so a longer build time here no longer risks the
+port-binding timeout that free tier hit.
 """
 
 import os
@@ -25,8 +26,8 @@ CHROMA_PATH = "./chroma_db"
 COLLECTION_NAME = "knowledge_base"
 CHUNK_SIZE = 100
 
-WIKI_ARTICLE_LIMIT = int(os.getenv("WIKI_ARTICLE_LIMIT", "60"))
-SQUAD_ROW_LIMIT = int(os.getenv("SQUAD_ROW_LIMIT", "200"))
+WIKI_ARTICLE_LIMIT = int(os.getenv("WIKI_ARTICLE_LIMIT", "1000"))
+SQUAD_ROW_LIMIT = int(os.getenv("SQUAD_ROW_LIMIT", "87599"))  # full SQuAD train split
 
 _model = None
 
